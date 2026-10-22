@@ -1,0 +1,60 @@
+# Blueprint do Render: New > Blueprint, escolha este repositório.
+# Cria a API (Django) e o frontend (Next.js) no plano gratuito. O banco é o
+# Postgres do Supabase; o Render pede o DATABASE_URL ao criar o Blueprint.
+
+services:
+  - type: web
+    name: eydisco-api
+    runtime: python
+    plan: free
+    rootDir: eydisco-api
+    # Deploy só quando a API mudar.
+    buildFilter:
+      paths:
+        - eydisco-api/**
+    buildCommand: >-
+      pip install uv &&
+      uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt &&
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput
+    # Migração e dados de exemplo rodam na partida, porque o pre-deploy é
+    # recurso pago. O seed só age com o banco vazio.
+    startCommand: >-
+      python manage.py migrate --noinput &&
+      python manage.py seed_demo --if-empty &&
+      gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    healthCheckPath: /api/route/
+    envVars:
+      # Mesma URL do eydisco-api/.env (pooler do Supabase, porta 6543).
+      - key: DATABASE_URL
+        sync: false
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: .onrender.com
+      # Senha das contas de demonstração (colecionador, fa0...). Troque se quiser.
+      - key: DEMO_PASSWORD
+        value: discos123
+      # Opcional, para os arquivos sobreviverem aos deploys (Cloudflare R2 ou S3):
+      # AWS_STORAGE_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+      # AWS_S3_ENDPOINT_URL (R2) e AWS_S3_CUSTOM_DOMAIN (domínio público do bucket).
+
+  - type: web
+    name: eydisco-web
+    runtime: node
+    plan: free
+    rootDir: eydisco-web
+    buildFilter:
+      paths:
+        - eydisco-web/**
+    buildCommand: npx --yes pnpm@12.15.0 install --frozen-lockfile && npx --yes pnpm@12.15.0 build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Endereço público da API, ex.: https://eydisco-api.onrender.com
+      # O Render pede este valor ao criar o Blueprint.
+      - key: API_URL
+        sync: false
