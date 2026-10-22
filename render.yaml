@@ -34,9 +34,10 @@ services:
         value: "false"
       - key: DJANGO_ALLOWED_HOSTS
         value: .onrender.com
-      # Senha das contas de demonstração (colecionador, fa0...). Troque se quiser.
+      # Senha das contas de demonstração (colecionador, fa0...). O Render pede
+      # o valor ao criar o Blueprint, para ela não ficar no repositório.
       - key: DEMO_PASSWORD
-        value: discos123
+        sync: false
       # Opcional, para os arquivos sobreviverem aos deploys (Cloudflare R2 ou S3):
       # AWS_STORAGE_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
       # AWS_S3_ENDPOINT_URL (R2) e AWS_S3_CUSTOM_DOMAIN (domínio público do bucket).

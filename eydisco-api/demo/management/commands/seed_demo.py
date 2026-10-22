@@ -14,6 +14,7 @@ import random
 from datetime import timedelta
 from pathlib import Path
 
+from django.conf import settings
 from django.core.files import File
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
@@ -195,14 +196,21 @@ class Command(BaseCommand):
         ))
 
     def create_users(self):
-        password = os.environ.get('DEMO_PASSWORD', 'discos123')
+        # Em produção a senha vem do DEMO_PASSWORD; sem ela, as contas existem mas
+        # ninguém entra com elas. Localmente, o padrão é discos123.
+        password = os.environ.get('DEMO_PASSWORD') or ('discos123' if settings.DEBUG else None)
+        if password is None:
+            self.stdout.write(self.style.WARNING('DEMO_PASSWORD vazio: contas de demonstração sem login.'))
         users = {}
         for username, first_name, last_name in [('colecionador', 'Ana', 'Souza'), ('terno.rei', 'Terno Rei', '')] + [
             (f'fa{i}', '', '') for i in range(16)
         ]:
             user, created = User.objects.get_or_create(username=username, defaults={'first_name': first_name, 'last_name': last_name})
             if created:
-                user.set_password(password)
+                if password:
+                    user.set_password(password)
+                else:
+                    user.set_unusable_password()
                 user.save()
             users[username] = user
         return users
