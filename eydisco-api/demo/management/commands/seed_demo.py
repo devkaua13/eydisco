@@ -2,13 +2,12 @@
 Behind the Track, Discovery Drop, programas da rádio, Houses e colecionadores.
 
     uv run python manage.py seed_demo             # cria o que faltar
-    uv run python manage.py seed_demo --if-empty  # só se não houver artista (para o build)
+    uv run python manage.py seed_demo --if-empty  # com dados, só repõe arquivos que sumiram
     uv run python manage.py seed_demo --on-air    # só recoloca rádio e Houses no ar agora
 
-As faixas vêm de demo/assets/audio; capas, avatares e fotos são gerados aqui.
+Faixas e imagens vêm de demo/assets (as imagens são geradas por demo/art.py).
 """
 
-import io
 import os
 import random
 from datetime import timedelta
@@ -16,11 +15,9 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.files import File
-from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
-from PIL import Image, ImageDraw, ImageFilter
 
 from accounts.models import User
 from artists.models import Artist
@@ -30,7 +27,9 @@ from orders.services import place_order
 from radio.models import Show, ShowTrack
 from releases.models import Credit, Edition, Extra, Release, Track
 
-AUDIO_DIR = Path(__file__).resolve().parents[2] / 'assets' / 'audio'
+ASSETS_DIR = Path(__file__).resolve().parents[2] / 'assets'
+AUDIO_DIR = ASSETS_DIR / 'audio'
+IMAGES_DIR = ASSETS_DIR / 'images'
 
 ARTISTS = [
     ('Marina Sena', 'marina-sena', 'Cantora e compositora mineira. Pop tropical com sintetizador, guitarra baiana e muito calor.'),
@@ -114,59 +113,19 @@ SHIPPING = dict(recipient_name='Ana Souza', postal_code='01310-100', street='Ave
                 complement='ap 12', neighborhood='Bela Vista', city='São Paulo', state='SP')
 
 
-def jpeg(img):
-    buf = io.BytesIO()
-    img.convert('RGB').save(buf, 'JPEG', quality=88)
-    return buf.getvalue()
+def save_asset(field_file, source):
+    with source.open('rb') as f:
+        field_file.save(source.name, File(f))
 
 
-def glow_cover(seed, palette, size=900):
-    """Luz desfocada com faixas horizontais, no estilo das referências."""
-    rnd = random.Random(seed)
-    light = Image.new('RGB', (size, size))
-    d = ImageDraw.Draw(light)
-    for i in range(rnd.randint(2, 3)):
-        r = rnd.randint(200, 330)
-        cx, cy = rnd.randint(250, 650), rnd.randint(300, 620)
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=palette[i % len(palette)])
-    img = Image.blend(Image.new('RGB', (size, size), (8, 6, 16)), light.filter(ImageFilter.GaussianBlur(70)), 0.95)
-    if rnd.random() < 0.7:
-        stripes = Image.new('L', (size, size), 255)
-        sd = ImageDraw.Draw(stripes)
-        step = rnd.randint(14, 24)
-        for y in range(0, size, step):
-            sd.rectangle([0, y, size, y + step // 3], fill=150)
-        img = Image.composite(img, Image.new('RGB', (size, size)), stripes)
-    vignette = Image.new('L', (size, size))
-    ImageDraw.Draw(vignette).ellipse([-200, -200, size + 200, size + 200], fill=255)
-    return Image.composite(img, Image.new('RGB', (size, size), (4, 3, 10)), vignette.filter(ImageFilter.GaussianBlur(160)))
-
-
-def stage_cover(seed):
-    """Palco com luz roxa e público: foto das Houses."""
-    rnd = random.Random(seed)
-    w, h = 1200, 800
-    light = Image.new('RGB', (w, h))
-    d = ImageDraw.Draw(light)
-    for _ in range(5):
-        x = rnd.randint(100, w - 100)
-        d.polygon([(x, 0), (x - rnd.randint(80, 200), h), (x + rnd.randint(80, 200), h)],
-                  fill=rnd.choice([(140, 60, 255), (200, 80, 255), (90, 60, 220)]))
-    d.ellipse([w // 2 - 260, 120, w // 2 + 260, 220], outline=(220, 120, 255), width=10)
-    img = Image.blend(Image.new('RGB', (w, h), (10, 4, 22)), light.filter(ImageFilter.GaussianBlur(35)), 0.75)
-    crowd = ImageDraw.Draw(img)
-    for _ in range(140):
-        x, y, r = rnd.randint(-20, w + 20), rnd.randint(int(h * 0.72), h), rnd.randint(18, 34)
-        crowd.ellipse([x - r, y - r, x + r, y + r * 3], fill=(6, 3, 12))
-    return img
-
-
-def avatar(seed, color):
-    img = Image.new('RGB', (600, 600), color)
-    d = ImageDraw.Draw(img)
-    d.ellipse([150, 90, 450, 390], fill=(8, 6, 16))
-    d.ellipse([60, 330, 540, 820], fill=(8, 6, 16))
-    return img.filter(ImageFilter.GaussianBlur(random.Random(seed).randint(3, 8)))
+def audio_assets():
+    """Slug da faixa -> arquivo em demo/assets/audio, na mesma ordem do seed."""
+    paths, index = {}, 0
+    for _, _, slug, _, _, _, _, tracks in RELEASES:
+        for position in range(1, len(tracks) + 1):
+            index += 1
+            paths[f'{slug}-{position}'] = AUDIO_DIR / f'{index}.mp3'
+    return paths
 
 
 class Command(BaseCommand):
@@ -181,7 +140,7 @@ class Command(BaseCommand):
             self.put_on_air()
             return
         if if_empty and Artist.objects.exists():
-            self.stdout.write('Já há dados; nada a fazer.')
+            self.restore_media()
             return
         with transaction.atomic():
             users = self.create_users()
@@ -217,17 +176,16 @@ class Command(BaseCommand):
 
     def create_catalog(self):
         now = timezone.now()
-        for i, (name, slug, bio) in enumerate(ARTISTS):
+        for name, slug, bio in ARTISTS:
             artist, created = Artist.objects.get_or_create(slug=slug, defaults={'name': name, 'bio': bio})
             if created or not artist.avatar:
-                color = [(40, 20, 70), (20, 30, 70), (60, 20, 50), (20, 50, 60), (50, 30, 20)][i % 5]
-                artist.avatar.save(f'{slug}.jpg', ContentFile(jpeg(avatar(slug, color))))
+                save_asset(artist.avatar, IMAGES_DIR / 'artists' / f'{slug}.jpg')
         Artist.objects.get(slug='terno-rei').managers.add(User.objects.get(username='terno.rei'))
 
         rnd = random.Random(3)
         audio_index = 0
         releases = {}
-        for artist_slug, title, slug, presale, release, palette, editions, tracks in RELEASES:
+        for artist_slug, title, slug, presale, release, _palette, editions, tracks in RELEASES:
             r, created = Release.objects.get_or_create(slug=slug, defaults={
                 'artist': Artist.objects.get(slug=artist_slug),
                 'title': title,
@@ -239,7 +197,7 @@ class Command(BaseCommand):
                 'released_at': now + timedelta(days=release),
             })
             if not r.cover:
-                r.cover.save(f'{slug}.jpg', ContentFile(jpeg(glow_cover(slug, palette))))
+                save_asset(r.cover, IMAGES_DIR / 'releases' / f'{slug}.jpg')
             for name, price, supply in editions:
                 key = next((k for k in INCLUDES if k.lower() in name.lower()), 'Vinil')
                 Edition.objects.get_or_create(release=r, name=name, defaults={
@@ -330,7 +288,7 @@ class Command(BaseCommand):
             })
             if not created:
                 continue
-            house.cover.save(f'{slug}.jpg', ContentFile(jpeg(stage_cover(slug))))
+            save_asset(house.cover, IMAGES_DIR / 'houses' / f'{slug}.jpg')
             position = 0
             for _ in range(HOUSE_REPEAT if minutes < 0 else 1):
                 for track in release.tracks.all():
@@ -356,3 +314,40 @@ class Command(BaseCommand):
                 for fan in random.Random(slug).sample(fans, min(6, len(fans))):
                     Participant.objects.update_or_create(house=house, user=fan, defaults={'last_seen_at': ends})
         self.stdout.write('Rádio e Houses de demonstração no ar.')
+
+    def restore_media(self):
+        """Repõe os arquivos de demonstração que sumiram do storage.
+
+        Sem bucket, o Render gratuito apaga o disco quando o serviço reinicia; o
+        banco continua apontando para os arquivos. Os de demonstração voltam dos
+        assets; os enviados pelo site não têm como voltar, então o campo é limpo
+        e a página usa a imagem padrão (a capa do Disc, as iniciais).
+        """
+        restored, cleared = 0, 0
+
+        def ensure(instance, field, source=None, required=False):
+            nonlocal restored, cleared
+            file = getattr(instance, field)
+            if not file or file.storage.exists(file.name):
+                return
+            if source and source.exists():
+                with source.open('rb') as f:
+                    file.storage.save(file.name, File(f))
+                restored += 1
+            elif not required:
+                setattr(instance, field, '')
+                instance.save(update_fields=[field])
+                cleared += 1
+
+        audio = audio_assets()
+        for track in Track.objects.all():
+            ensure(track, 'audio', audio.get(track.slug), required=True)
+        for release in Release.objects.all():
+            ensure(release, 'cover', IMAGES_DIR / 'releases' / f'{release.slug}.jpg')
+        for artist in Artist.objects.all():
+            ensure(artist, 'avatar', IMAGES_DIR / 'artists' / f'{artist.slug}.jpg')
+        for house in House.objects.all():
+            ensure(house, 'cover', IMAGES_DIR / 'houses' / f'{house.slug}.jpg')
+        for extra in Extra.objects.exclude(file=''):
+            ensure(extra, 'file')
+        self.stdout.write(f'Arquivos: {restored} repostos, {cleared} sem cópia (campo limpo).')

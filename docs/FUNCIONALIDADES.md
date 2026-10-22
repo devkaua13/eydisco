@@ -352,10 +352,10 @@ O comando `seed_demo` cria:
 - **1 Discovery Drop, 4 programas de rádio e 5 Houses**, uma de cada tipo, mais uma pública extra.
 - **18 contas**, com pedidos já feitos para os números não começarem em #1.
 
-As faixas são instrumentais sintetizadas, sem música de terceiros. Capas, avatares e fotos de House são gerados pelo próprio comando. Os textos e títulos são fictícios. Os nomes de artistas reais estão só para a demonstração e devem ser trocados antes de mostrar a qualquer pessoa de fora.
+As faixas são instrumentais sintetizadas, sem música de terceiros. Capas, avatares e fotos de House foram geradas por `demo/art.py`. Todos esses arquivos ficam em `eydisco-api/demo/assets`. Os textos e títulos são fictícios. Os nomes de artistas reais estão só para a demonstração e devem ser trocados antes de mostrar a qualquer pessoa de fora.
 
 O comando aceita duas opções:
-- `--if-empty`: não faz nada se já houver artistas. É assim que o deploy usa.
+- `--if-empty`: com o banco vazio, cria tudo; com dados, só repõe os arquivos de demonstração que sumiram do disco. É assim que o deploy usa a cada partida.
 - `--on-air`: só recoloca a rádio e as Houses de demonstração no ar agora.
 
 ## 20. Como a sincronia funciona

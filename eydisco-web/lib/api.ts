@@ -45,6 +45,24 @@ export class ApiError extends Error {
   }
 }
 
+// No plano gratuito do Render a API dorme quando fica parada e leva perto de um
+// minuto para acordar; enquanto isso a conexão falha ou volta 502/503/504.
+const WAKE_UP_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000]
+const WAKING_STATUSES = new Set([502, 503, 504])
+
+async function withWakeUpRetry(request: () => Promise<Response>) {
+  for (const delay of WAKE_UP_DELAYS_MS) {
+    try {
+      const response = await request()
+      if (!WAKING_STATUSES.has(response.status)) return response
+    } catch {
+      // Conexão recusada ou derrubada: a API ainda está subindo.
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+  return request()
+}
+
 type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "DELETE"
   body?: unknown
@@ -67,13 +85,17 @@ export async function apiFetch<T>(
   if (body !== undefined) headers["Content-Type"] = "application/json"
   if (auth) headers.Authorization = `Token ${auth}`
 
-  // Estoque e pedidos mudam a cada compra, então nada é cacheado.
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: "no-store",
-  })
+  const request = () =>
+    // Estoque e pedidos mudam a cada compra, então nada é cacheado.
+    fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    })
+  // Só leituras se repetem: uma compra repetida reservaria dois números.
+  const response =
+    method === "GET" ? await withWakeUpRetry(request) : await request()
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null)

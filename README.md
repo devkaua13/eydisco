@@ -81,6 +81,6 @@ O `render.yaml` descreve os dois serviços. No Render: **New → Blueprint**, es
 
 Na primeira partida, a API aplica as migrações e, se o banco estiver vazio, roda o `seed_demo`. Cada `git push` na `main` faz um novo deploy do serviço cuja pasta mudou.
 
-**Arquivos enviados:** faixas, capas e fotos de House ficam em disco, a não ser que `AWS_STORAGE_BUCKET_NAME` esteja configurado. No plano gratuito do Render esse disco é apagado quando o serviço reinicia. Para os arquivos ficarem permanentes, configure um bucket S3, Cloudflare R2 ou Supabase Storage com as variáveis `AWS_*` descritas em `render.yaml`.
+**Arquivos enviados:** faixas, capas e fotos de House ficam em disco, a não ser que `AWS_STORAGE_BUCKET_NAME` esteja configurado. No plano gratuito do Render esse disco é apagado quando o serviço reinicia. Os arquivos de demonstração estão em `eydisco-api/demo/assets` e a API os repõe a cada partida. Os enviados pelo site, como a foto de uma House criada por alguém, se perdem; a página passa a usar a imagem padrão. Para os arquivos ficarem permanentes, configure um bucket S3, Cloudflare R2 ou Supabase Storage com as variáveis `AWS_*` descritas em `render.yaml`.
 
-**Plano gratuito:** os serviços dormem depois de uns 15 minutos sem acesso, e a primeira visita depois disso demora perto de um minuto.
+**Plano gratuito:** os serviços dormem depois de uns 15 minutos sem acesso. A primeira visita depois disso demora perto de um minuto: o site fica tentando por esse tempo enquanto a API acorda, antes de mostrar erro.
